@@ -211,6 +211,11 @@ class static_press_admin {
 	}
 
 	public function static_press_page(){
+		// debug start here
+		//$staticpress = static_press::$instance;
+		//var_dump($staticpress->remote_get('/'));
+		// debug end
+
 		$title = __('Rebuild', self::TEXT_DOMAIN);
 ?>
 		<div class="wrap" style="margin=top:2em;" id="<?php echo self::OPTION_PAGE; ?>">
@@ -287,7 +292,13 @@ jQuery(function($){
 							ul.append('<li>' + file_count + ' : ' + this.static + '</li>');
 						}
 					});
-					$('html,body').animate({scrollTop: $('li:last-child', ul).offset().top},'slow');
+
+					// ignore scroll error
+					try {
+						$('html,body').animate({scrollTop: $('li:last-child', ul).offset().top},'slow');
+					}
+					catch (ex) {}
+
 					if (response.final)
 						static_press_finalyze();
 					else

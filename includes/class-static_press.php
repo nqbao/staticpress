@@ -22,7 +22,7 @@ class static_press {
 	private $static_files_ext = array(
 		'html','htm','txt','css','js','gif','png','jpg','jpeg',
 		'mp3','ico','ttf','woff','woff2','otf','eot','svg','svgz','xml',
-		'gz','zip', 'pdf', 'swf', 'xsl',
+		'gz','zip', 'pdf', 'swf', 'xsl', 'mov'
 		);
 
 	function __construct($plugin_basename, $static_url = '/', $static_dir = '', $remote_get_option = array()){
@@ -50,7 +50,7 @@ class static_press {
 			isset($parsed['scheme'])
 			? $parsed['scheme']
 			: 'http';
-		$host     = 
+		$host     =
 			isset($parsed['host'])
 			? $parsed['host']
 			: (defined('DOMAIN_CURRENT_SITE') ? DOMAIN_CURRENT_SITE : $_SERVER['HTTP_HOST']);
@@ -148,6 +148,7 @@ CREATE TABLE `{$this->url_table}` (
 			wp_die('Forbidden');
 
 		$urls = $this->insert_all_url();
+
 		$sql = $wpdb->prepare(
 			"select type, count(*) as count from {$this->url_table} where `last_upload` < %s and enable = 1 group by type",
 			$this->fetch_start_time()
@@ -167,6 +168,9 @@ CREATE TABLE `{$this->url_table}` (
 
 		if (!defined('WP_DEBUG_DISPLAY'))
 			define('WP_DEBUG_DISPLAY', false);
+
+		// disable memory limit so we won't run out of memory
+		ini_set('memory_limit', '512M');
 
 		$url = $this->fetch_url();
 		if (!$url) {
@@ -200,6 +204,7 @@ CREATE TABLE `{$this->url_table}` (
 					$static_file = $this->create_static_file($page_url, 'other_page', false, true);
 					break;
 				}
+
 				if (!$static_file)
 					break;
 				$file_count++;
@@ -250,15 +255,17 @@ CREATE TABLE `{$this->url_table}` (
 		$site_url = trailingslashit($this->get_site_url());
 		$url = trim(str_replace($site_url, '/', $url));
 		$static_files_filter = apply_filters('StaticPress::static_files_filter', $this->static_files_ext);
+
 		if (!preg_match('#[^/]+\.' . implode('|', array_merge($static_files_filter, array('php'))) . '$#i', $url))
 			$url = trailingslashit($url);
+
 		unset($static_files_filter);
 		return $url;
 	}
 
 	public function static_url($permalink) {
 		return urldecode(
-			preg_match('/\.[^\.]+?$/i', $permalink) 
+			preg_match('/\.[^\.]+?$/i', $permalink)
 			? $permalink
 			: trailingslashit(trim($permalink)) . 'index.html');
 	}
@@ -351,6 +358,7 @@ CREATE TABLE `{$this->url_table}` (
 	private function make_subdirectories($file){
 		$dir_sep = $subdir = $this->dir_sep();
 		$directories = explode($dir_sep, dirname($file));
+
 		foreach ($directories as $dir){
 			if (empty($dir))
 				continue;
@@ -369,12 +377,14 @@ CREATE TABLE `{$this->url_table}` (
 
 		$http_code = 200;
 		$blog_charset = get_option('blog_charset');
+
 		switch ($file_type) {
 		case 'front_page':
 		case 'single':
 		case 'term_archive':
 		case 'author_archive':
 		case 'other_page':
+		case 'seo_files':
 			// get remote file
 			if (($content = $this->remote_get($url)) && isset($content['body'])) {
 				if ($blog_charset === 'UTF-8') {
@@ -414,6 +424,8 @@ CREATE TABLE `{$this->url_table}` (
 		do_action('StaticPress::file_put', $file_dest, untrailingslashit($this->static_url). $this->static_url($url));
 
 		if (file_exists($file_dest)) {
+			$file_date = filemtime($file_dest);
+
 			$this->update_url(array(array(
 				'type' => $file_type,
 				'url' => $url,
@@ -436,12 +448,14 @@ CREATE TABLE `{$this->url_table}` (
 		return $file_dest;
 	}
 
-	private function remote_get($url){
+	function remote_get($url){
 		if (!preg_match('#^https://#i', $url))
 			$url = untrailingslashit($this->get_site_url()) . (preg_match('#^/#i', $url) ? $url : "/{$url}");
+
 		$response = wp_remote_get($url, $this->remote_get_option);
 		if (is_wp_error($response))
 			return false;
+
 		return array(
 			'code' => $response['response']['code'],
 			'body' => $this->remove_link_tag($response['body'], intval($response['response']['code'])),
@@ -496,6 +510,8 @@ CREATE TABLE `{$this->url_table}` (
 			'# (href|src|action)="(/[^"]*)"#ism',
 			"# (href|src|action)='(/[^']*)'#ism",
 		);
+
+		// TODO: don't replace static url
 		$content = preg_replace($pattern, ' $1="'.$home_url.'$2"', $content);
 
 		$content = str_replace($site_url, trailingslashit($this->static_url), $content);
@@ -831,7 +847,7 @@ select MAX(P.post_modified) as last_modified, count(P.ID) as count
 
 		$authors = $wpdb->get_results("
 SELECT DISTINCT post_author, COUNT(ID) AS count, MAX(post_modified) AS modified
- FROM {$wpdb->posts} 
+ FROM {$wpdb->posts}
  where post_status = 'publish'
    and post_type in ({$this->post_types})
  group by post_author
@@ -898,7 +914,7 @@ SELECT DISTINCT post_author, COUNT(ID) AS count, MAX(post_modified) AS modified
 			);
 		$count = intval($wpdb->get_var($sql));
 		wp_cache_set('StaticPress::'.$link, $count, 'static_press');
-		
+
 		return $count > 0;
 	}
 
@@ -967,7 +983,7 @@ SELECT DISTINCT post_author, COUNT(ID) AS count, MAX(post_modified) AS modified
 		    (?: [\x00-\x7F]                 # single-byte sequences   0xxxxxxx
 		    |   [\xC0-\xDF][\x80-\xBF]      # double-byte sequences   110xxxxx 10xxxxxx
 		    |   [\xE0-\xEF][\x80-\xBF]{2}   # triple-byte sequences   1110xxxx 10xxxxxx * 2
-		    |   [\xF0-\xF7][\x80-\xBF]{3}   # quadruple-byte sequence 11110xxx 10xxxxxx * 3 
+		    |   [\xF0-\xF7][\x80-\xBF]{3}   # quadruple-byte sequence 11110xxx 10xxxxxx * 3
 		    ){1,100}                        # ...one or more times
 		  )
 		| .                                 # anything else
